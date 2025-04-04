@@ -28,6 +28,8 @@ final: prev: {
       make install
       mkdir -p $out/debug/
       cp debug/*.py $out/debug/
+      mkdir -p $out/source/
+      cp -r $src/* $out/source/
       runHook postInstall
     '';
   };

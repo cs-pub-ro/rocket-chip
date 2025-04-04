@@ -45,6 +45,7 @@
               export PATH="$PIP_PREFIX/bin:$PATH"
               unset SOURCE_DATE_EPOCH
               pip3 install importlib-metadata typing-extensions riscof==1.25.2 pexpect
+              export ROCKETCHIP=$(pwd)
             '';
           };
         }
