@@ -1,8 +1,10 @@
+import millbuild.common
 import mill._
 import mill.scalalib._
 import mill.scalalib.publish._
 import coursier.maven.MavenRepository
 import $file.dependencies.hardfloat.common
+import $file.dependencies.nrshgl.common
 import $file.dependencies.cde.common
 import $file.dependencies.diplomacy.common
 import $file.dependencies.chisel.build
@@ -57,6 +59,28 @@ trait Hardfloat
   def scalaVersion: T[String] = T(v.scala)
 
   override def millSourcePath = os.pwd / "dependencies" / "hardfloat" / "hardfloat"
+
+  def chiselModule = Option.when(crossValue == "source")(chisel)
+
+  def chiselPluginJar = T(Option.when(crossValue == "source")(chisel.pluginModule.jar()))
+
+  def chiselIvy = Option.when(crossValue != "source")(v.chiselCrossVersions(crossValue)._1)
+
+  def chiselPluginIvy = Option.when(crossValue != "source")(v.chiselCrossVersions(crossValue)._2)
+
+  def repositoriesTask = T.task(super.repositoriesTask() ++ v.sonatypesSnapshots)
+}
+
+object nrshgl extends mill.define.Cross[Nrshgl](v.chiselCrossVersions.keys.toSeq)
+
+trait Nrshgl
+  extends millbuild.dependencies.nrshgl.common.NrshglModule
+    with RocketChipPublishModule
+    with Cross.Module[String] {
+
+  def scalaVersion: T[String] = T(v.scala)
+
+  override def millSourcePath = os.pwd / "dependencies" / "nrshgl" / "nrshgl"
 
   def chiselModule = Option.when(crossValue == "source")(chisel)
 
@@ -128,6 +152,8 @@ trait RocketChip
   def macrosModule = macros
 
   def hardfloatModule = hardfloat(crossValue)
+
+  def nrshglModule = nrshgl(crossValue)
 
   def cdeModule = cde
 

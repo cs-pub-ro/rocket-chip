@@ -13,6 +13,7 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property
+import ro.upb.nrs.hgl._
 
 case class FPUParams(
   minFLen: Int = 32,

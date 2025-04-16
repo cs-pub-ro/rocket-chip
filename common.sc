@@ -44,11 +44,13 @@ trait RocketChipModule
 
   def diplomacyModule: ScalaModule
 
+  def nrshglModule: ScalaModule
+
   def mainargsIvy: Dep
 
   def json4sJacksonIvy: Dep
 
-  override def moduleDeps = super.moduleDeps ++ Seq(macrosModule, hardfloatModule, diplomacyModule)
+  override def moduleDeps = super.moduleDeps ++ Seq(macrosModule, hardfloatModule, diplomacyModule, nrshglModule)
 
   override def ivyDeps = T(
     super.ivyDeps() ++ Agg(
