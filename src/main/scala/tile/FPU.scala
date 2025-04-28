@@ -15,6 +15,23 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property
 import ro.upb.nrs.hgl._
 
+trait NRS {
+  def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint
+  def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint
+}
+
+object NRS_IEEE754 extends NRS {
+  override def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint = {
+    new EncoderIEEE754(expWidth, sigWidth, RoundUp, expWidth, sigWidth,
+      expWidth + sigWidth + 1)
+  }
+
+  override def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint = {
+    new DecoderIEEE754(expWidth, sigWidth, expWidth, sigWidth,
+      expWidth + sigWidth + 1)
+  }
+}
+
 case class FPUParams(
   minFLen: Int = 32,
   fLen: Int = 64,
@@ -22,7 +39,8 @@ case class FPUParams(
   sfmaLatency: Int = 3,
   dfmaLatency: Int = 4,
   fpmuLatency: Int = 2,
-  ifpuLatency: Int = 2
+  ifpuLatency: Int = 2,
+  nrs: NRS = NRS_IEEE754,
 )
 
 object FPConstants
@@ -631,7 +649,7 @@ class FPToFP(val latency: Int)(implicit p: Parameters) extends FPUModule()(p) wi
   io.out <> Pipe(in.valid, mux, latency-1)
 }
 
-class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int) extends Module
+class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) extends Module
 {
     override def desiredName = s"MulAddRecFNPipe_l${latency}_e${expWidth}_s${sigWidth}"
     require(latency<=2)
@@ -651,6 +669,14 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int) extends Module
 
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
+
+    // val encoder = Module(nrs.getEncoder(expWidth, sigWidth));
+    val decoder = Module(nrs.getDecoder(expWidth, sigWidth));
+
+    val floatingPoint = Wire(new FloatingPoint(expWidth, sigWidth))
+
+    decoder.io.binary := io.a
+    floatingPoint := decoder.io.result
 
     val mulAddRecFNToRaw_preMul = Module(new hardfloat.MulAddRecFNToRaw_preMul(expWidth, sigWidth))
     val mulAddRecFNToRaw_postMul = Module(new hardfloat.MulAddRecFNToRaw_postMul(expWidth, sigWidth))
@@ -695,7 +721,7 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int) extends Module
     io.exceptionFlags := roundRawFNToRecFN.io.exceptionFlags
 }
 
-class FPUFMAPipe(val latency: Int, val t: FType)
+class FPUFMAPipe(val latency: Int, val t: FType, nrs: NRS)
                 (implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   override def desiredName = s"FPUFMAPipe_l${latency}_f${t.ieeeWidth}"
   require(latency>0)
@@ -717,7 +743,7 @@ class FPUFMAPipe(val latency: Int, val t: FType)
     when (!(cmd_fma || cmd_addsub)) { in.in3 := zero }
   }
 
-  val fma = Module(new MulAddRecFNPipe((latency-1) min 2, t.exp, t.sig))
+  val fma = Module(new MulAddRecFNPipe((latency-1) min 2, t.exp, t.sig, nrs))
   fma.io.validin := valid
   fma.io.op := in.fmaCmd
   fma.io.roundingMode := in.rm
@@ -871,7 +897,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     req
   }
 
-  val sfma = Module(new FPUFMAPipe(cfg.sfmaLatency, FType.S))
+  val sfma = Module(new FPUFMAPipe(cfg.sfmaLatency, FType.S, cfg.nrs))
   sfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.typeTagOut === S
   sfma.io.in.bits := fuInput(Some(sfma.t))
 
@@ -912,13 +938,13 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     Pipe(ifpu, ifpu.latency, (c: FPUCtrlSigs) => c.fromint, ifpu.io.out.bits),
     Pipe(sfma, sfma.latency, (c: FPUCtrlSigs) => c.fma && c.typeTagOut === S, sfma.io.out.bits)) ++
     (fLen > 32).option({
-          val dfma = Module(new FPUFMAPipe(cfg.dfmaLatency, FType.D))
+          val dfma = Module(new FPUFMAPipe(cfg.dfmaLatency, FType.D, cfg.nrs))
           dfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.typeTagOut === D
           dfma.io.in.bits := fuInput(Some(dfma.t))
           Pipe(dfma, dfma.latency, (c: FPUCtrlSigs) => c.fma && c.typeTagOut === D, dfma.io.out.bits)
         }) ++
     (minFLen == 16).option({
-          val hfma = Module(new FPUFMAPipe(cfg.sfmaLatency, FType.H))
+          val hfma = Module(new FPUFMAPipe(cfg.sfmaLatency, FType.H, cfg.nrs))
           hfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.typeTagOut === H
           hfma.io.in.bits := fuInput(Some(hfma.t))
           Pipe(hfma, hfma.latency, (c: FPUCtrlSigs) => c.fma && c.typeTagOut === H, hfma.io.out.bits)
