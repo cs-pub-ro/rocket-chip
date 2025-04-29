@@ -670,55 +670,51 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
 
-    // val encoder = Module(nrs.getEncoder(expWidth, sigWidth));
-    val decoder = Module(nrs.getDecoder(expWidth, sigWidth));
+    val decoder_a = Module(nrs.getDecoder(expWidth, sigWidth))
+    val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth))
+    val decoder_c = Module(nrs.getDecoder(expWidth, sigWidth))
 
-    val floatingPoint = Wire(new FloatingPoint(expWidth, sigWidth))
+    val floatingPoint_a = Wire(new FloatingPoint(expWidth, sigWidth))
+    val floatingPoint_b = Wire(new FloatingPoint(expWidth, sigWidth))
+    val floatingPoint_c = Wire(new FloatingPoint(expWidth, sigWidth))
 
-    decoder.io.binary := io.a
-    floatingPoint := decoder.io.result
+    decoder_a.io.binary := io.a
+    decoder_b.io.binary := io.b
+    decoder_c.io.binary := io.c
 
-    val mulAddRecFNToRaw_preMul = Module(new hardfloat.MulAddRecFNToRaw_preMul(expWidth, sigWidth))
-    val mulAddRecFNToRaw_postMul = Module(new hardfloat.MulAddRecFNToRaw_postMul(expWidth, sigWidth))
+    floatingPoint_a := decoder_a.io.result
+    floatingPoint_b := decoder_b.io.result
+    floatingPoint_c := decoder_c.io.result
 
-    mulAddRecFNToRaw_preMul.io.op := io.op
-    mulAddRecFNToRaw_preMul.io.a  := io.a
-    mulAddRecFNToRaw_preMul.io.b  := io.b
-    mulAddRecFNToRaw_preMul.io.c  := io.c
+    val floatingPoint_result = Wire(new FloatingPoint(expWidth, sigWidth))
 
-    val mulAddResult =
-        (mulAddRecFNToRaw_preMul.io.mulAddA *
-             mulAddRecFNToRaw_preMul.io.mulAddB) +&
-            mulAddRecFNToRaw_preMul.io.mulAddC
+    floatingPoint_result := 0.U.asTypeOf(floatingPoint_result)
+
+    when (io.op === 0.U) {
+        floatingPoint_result := floatingPoint_a * floatingPoint_b + floatingPoint_c
+    } .elsewhen (io.op === 1.U) {
+        floatingPoint_result := floatingPoint_a * floatingPoint_b - floatingPoint_c
+    } .elsewhen (io.op === 2.U) {
+        floatingPoint_result := -(floatingPoint_a * floatingPoint_b) + floatingPoint_c
+    } .otherwise {
+        floatingPoint_result := -(floatingPoint_a * floatingPoint_b) - floatingPoint_c
+    }
 
     val valid_stage0 = Wire(Bool())
-    val roundingMode_stage0 = Wire(UInt(3.W))
-    val detectTininess_stage0 = Wire(UInt(1.W))
+    // TODO: add support for rounding and exception flags
+    // val roundingMode_stage0 = Wire(UInt(3.W))
 
     val postmul_regs = if(latency>0) 1 else 0
-    mulAddRecFNToRaw_postMul.io.fromPreMul   := Pipe(io.validin, mulAddRecFNToRaw_preMul.io.toPostMul, postmul_regs).bits
-    mulAddRecFNToRaw_postMul.io.mulAddResult := Pipe(io.validin, mulAddResult, postmul_regs).bits
-    mulAddRecFNToRaw_postMul.io.roundingMode := Pipe(io.validin, io.roundingMode, postmul_regs).bits
-    roundingMode_stage0                      := Pipe(io.validin, io.roundingMode, postmul_regs).bits
-    detectTininess_stage0                    := Pipe(io.validin, io.detectTininess, postmul_regs).bits
     valid_stage0                             := Pipe(io.validin, false.B, postmul_regs).valid
 
-    //------------------------------------------------------------------------
-    //------------------------------------------------------------------------
-
-    val roundRawFNToRecFN = Module(new hardfloat.RoundRawFNToRecFN(expWidth, sigWidth, 0))
+    val encoder = Module(nrs.getEncoder(expWidth, sigWidth))
+    encoder.io.floatingPoint := floatingPoint_result
 
     val round_regs = if(latency==2) 1 else 0
-    roundRawFNToRecFN.io.invalidExc         := Pipe(valid_stage0, mulAddRecFNToRaw_postMul.io.invalidExc, round_regs).bits
-    roundRawFNToRecFN.io.in                 := Pipe(valid_stage0, mulAddRecFNToRaw_postMul.io.rawOut, round_regs).bits
-    roundRawFNToRecFN.io.roundingMode       := Pipe(valid_stage0, roundingMode_stage0, round_regs).bits
-    roundRawFNToRecFN.io.detectTininess     := Pipe(valid_stage0, detectTininess_stage0, round_regs).bits
     io.validout                             := Pipe(valid_stage0, false.B, round_regs).valid
 
-    roundRawFNToRecFN.io.infiniteExc := false.B
-
-    io.out            := roundRawFNToRecFN.io.out
-    io.exceptionFlags := roundRawFNToRecFN.io.exceptionFlags
+    io.out            := encoder.io.binary
+    io.exceptionFlags := 0.U
 }
 
 class FPUFMAPipe(val latency: Int, val t: FType, nrs: NRS)
