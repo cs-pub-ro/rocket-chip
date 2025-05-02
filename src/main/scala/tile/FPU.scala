@@ -22,13 +22,13 @@ trait NRS {
 
 object NRS_IEEE754 extends NRS {
   override def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint = {
-    new EncoderIEEE754(expWidth, sigWidth, RoundUp, expWidth, sigWidth,
-      expWidth + sigWidth + 1)
+    new EncoderIEEE754(expWidth, sigWidth - 1, RoundUp, expWidth, sigWidth - 1,
+      expWidth + sigWidth)
   }
 
   override def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint = {
-    new DecoderIEEE754(expWidth, sigWidth, expWidth, sigWidth,
-      expWidth + sigWidth + 1)
+    new DecoderIEEE754(expWidth, sigWidth - 1, expWidth, sigWidth - 1,
+      expWidth + sigWidth)
   }
 }
 
@@ -674,19 +674,19 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth))
     val decoder_c = Module(nrs.getDecoder(expWidth, sigWidth))
 
-    val floatingPoint_a = Wire(new FloatingPoint(expWidth, sigWidth))
-    val floatingPoint_b = Wire(new FloatingPoint(expWidth, sigWidth))
-    val floatingPoint_c = Wire(new FloatingPoint(expWidth, sigWidth))
+    val floatingPoint_a = Wire(new FloatingPoint(expWidth, sigWidth - 1))
+    val floatingPoint_b = Wire(new FloatingPoint(expWidth, sigWidth - 1))
+    val floatingPoint_c = Wire(new FloatingPoint(expWidth, sigWidth - 1))
 
-    decoder_a.io.binary := io.a
-    decoder_b.io.binary := io.b
-    decoder_c.io.binary := io.c
+    decoder_a.io.binary := FType(expWidth, sigWidth).ieee(io.a)
+    decoder_b.io.binary := FType(expWidth, sigWidth).ieee(io.b)
+    decoder_c.io.binary := FType(expWidth, sigWidth).ieee(io.c)
 
     floatingPoint_a := decoder_a.io.result
     floatingPoint_b := decoder_b.io.result
     floatingPoint_c := decoder_c.io.result
 
-    val floatingPoint_result = Wire(new FloatingPoint(expWidth, sigWidth))
+    val floatingPoint_result = Wire(new FloatingPoint(expWidth, sigWidth - 1))
 
     floatingPoint_result := 0.U.asTypeOf(floatingPoint_result)
 
@@ -713,7 +713,7 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     val round_regs = if(latency==2) 1 else 0
     io.validout                             := Pipe(valid_stage0, false.B, round_regs).valid
 
-    io.out            := encoder.io.binary
+    io.out            := FType(expWidth, sigWidth).recode(encoder.io.binary)
     io.exceptionFlags := 0.U
 }
 
