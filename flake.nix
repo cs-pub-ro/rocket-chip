@@ -24,9 +24,9 @@
           python3Packages.pip
           pkgsCross.riscv64-embedded.buildPackages.gcc
           pkgsCross.riscv64-embedded.buildPackages.gdb
+          pkgs.pkgsCross.riscv64-embedded.riscv-pk
           openocd
           circt
-
           spike riscvTests
         ];
       in
