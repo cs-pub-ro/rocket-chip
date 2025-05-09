@@ -16,13 +16,24 @@ import freechips.rocketchip.util.property
 import ro.upb.nrs.hgl._
 
 trait NRS {
+  def getInternalExponentSize(expWidth : Int, sigWidth : Int) : Int
+  def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int
+
   def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint
   def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint
 }
 
 object NRS_IEEE754 extends NRS {
+  override def getInternalExponentSize(expWidth : Int, sigWidth : Int) : Int = {
+    IEEE754.internalFractionSize(expWidth, sigWidth - 1)
+  }
+
+  override def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int = {
+    IEEE754.internalExponentSize(expWidth, sigWidth - 1)
+  }
+
   override def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint = {
-    new EncoderIEEE754(expWidth, sigWidth - 1, RoundUp, expWidth, sigWidth - 1,
+    new EncoderIEEE754(expWidth, sigWidth - 1, None, expWidth, sigWidth - 1,
       expWidth + sigWidth)
   }
 
@@ -689,7 +700,7 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     }
 
     val valid_stage0 = Wire(Bool())
-    // TODO: add support for rounding and exception flags
+    // TODO: add support for exception flags
     // val roundingMode_stage0 = Wire(UInt(3.W))
 
     val postmul_regs = if(latency>0) 1 else 0
@@ -697,6 +708,10 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
 
     val encoder = Module(nrs.getEncoder(expWidth, sigWidth))
     encoder.io.floatingPoint := floatingPoint_result
+    encoder.io.roundingType match {
+      case Some(r) => r := io.roundingMode
+      case None => 
+    }
 
     val round_regs = if(latency==2) 1 else 0
     io.validout                             := Pipe(valid_stage0, false.B, round_regs).valid
