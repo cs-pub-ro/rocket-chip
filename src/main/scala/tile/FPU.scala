@@ -543,7 +543,7 @@ class FPToInt(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetime
   io.out.bits.in := in
 }
 
-class IntToFP(val latency: Int)(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+class IntToFP(val latency: Int, val nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new IntToFPInput))
     val out = Valid(new FPResult)
@@ -571,12 +571,19 @@ class IntToFP(val latency: Int)(implicit p: Parameters) extends FPUModule()(p) w
     // could be improved for RVD/RVQ with a single variable-position rounding
     // unit, rather than N fixed-position ones
     val i2fResults = for (t <- floatTypes) yield {
-      val i2f = Module(new hardfloat.INToRecFN(xLen, t.exp, t.sig))
-      i2f.io.signedIn := ~in.bits.typ(0)
-      i2f.io.in := intValue
-      i2f.io.roundingMode := in.bits.rm
-      i2f.io.detectTininess := hardfloat.consts.tininess_afterRounding
-      (sanitizeNaN(i2f.io.out, t), i2f.io.exceptionFlags)
+      val conv = Module(new IntegerToFloatingPoint(xLen, t.exp, t.sig - 1))
+      conv.io.integer := intValue
+      conv.io.sign := ~in.bits.typ(0)
+
+      val encoder = Module(nrs.getEncoder(t.exp, t.sig))
+      encoder.io.floatingPoint := conv.io.result
+      encoder.io.roundingType match {
+        case Some(r) => r := in.bits.rm
+        case None => 
+      }
+
+      // TODO exception flags
+      (sanitizeNaN(encoder.io.binary, t), 0.U)
     }
 
     val (data, exc) = i2fResults.unzip
@@ -910,7 +917,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     io.cp_resp.valid := true.B
   }
 
-  val ifpu = Module(new IntToFP(cfg.ifpuLatency))
+  val ifpu = Module(new IntToFP(cfg.ifpuLatency, cfg.nrs))
   ifpu.io.in.valid := req_valid && ex_ctrl.fromint
   ifpu.io.in.bits := fpiu.io.in.bits
   ifpu.io.in.bits.in1 := Mux(ex_cp_valid, io.cp_req.bits.in1, io.fromint_data)
