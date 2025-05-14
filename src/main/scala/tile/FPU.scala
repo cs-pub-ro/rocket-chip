@@ -468,7 +468,7 @@ trait HasFPUParameters {
 
 abstract class FPUModule(implicit val p: Parameters) extends Module with HasCoreParameters with HasFPUParameters
 
-class FPToInt(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+class FPToInt(nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   class Output extends Bundle {
     val in = new FPInput
     val lt = Bool()
@@ -484,14 +484,33 @@ class FPToInt(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetime
   val in = RegEnable(io.in.bits, io.in.valid)
   val valid = RegNext(io.in.valid)
 
-  val dcmp = Module(new hardfloat.CompareRecFN(maxExpWidth, maxSigWidth))
-  dcmp.io.a := in.in1
-  dcmp.io.b := in.in2
-  dcmp.io.signaling := !in.rm(1)
+  val comparators = floatTypes.map(t => {
+    val cmp = Module(new FloatingPointComparator(t.exp, t.sig - 1))
+    cmp
+  })
+
+  for (t <- floatTypes) {
+    val idx = typeTag(t)
+    val cmp = comparators(idx)
+
+    val a = in.in1(t.ieeeWidth - 1, 0)
+    val b = in.in2(t.ieeeWidth - 1, 0)
+
+    val decoder_a = Module(nrs.getDecoder(t.exp, t.sig))
+    val decoder_b = Module(nrs.getDecoder(t.exp, t.sig))
+    decoder_a.io.binary := a
+    decoder_b.io.binary := b
+
+    cmp.io.operand1 := decoder_a.io.result
+    cmp.io.operand2 := decoder_b.io.result
+  }
 
   val tag = in.typeTagOut
   val toint_ieee = (floatTypes.map(t => if (t == FType.H) Fill(maxType.ieeeWidth / minXLen,   ieee(in.in1)(15, 0).sextTo(minXLen))
-                                        else              Fill(maxType.ieeeWidth / t.ieeeWidth, ieee(in.in1)(t.ieeeWidth - 1, 0))): Seq[UInt])(tag)
+  else              Fill(maxType.ieeeWidth / t.ieeeWidth, ieee(in.in1)(t.ieeeWidth - 1, 0))): Seq[UInt])(tag)
+  
+  val lt = Mux1H(UIntToOH(tag), comparators.map(_.io.l))
+  val eq = Mux1H(UIntToOH(tag), comparators.map(_.io.e))
 
   val toint = WireDefault(toint_ieee)
   val intType = WireDefault(in.fmt(0))
@@ -499,47 +518,45 @@ class FPToInt(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetime
   io.out.bits.toint := ((0 until nIntTypes).map(i => toint((minXLen << i) - 1, 0).sextTo(xLen)): Seq[UInt])(intType)
   io.out.bits.exc := 0.U
 
-  when (in.rm(0)) {
-    val classify_out = (floatTypes.map(t => t.classify(maxType.unsafeConvert(in.in1, t))): Seq[UInt])(tag)
-    toint := classify_out | (toint_ieee >> minXLen << minXLen)
-    intType := false.B
-  }
+  // TODO check later
+  // when (in.rm(0)) {
+  //   val classify_out = (floatTypes.map(t => t.classify(maxType.unsafeConvert(in.in1, t))): Seq[UInt])(tag)
+  //   toint := classify_out | (toint_ieee >> minXLen << minXLen)
+  //   intType := false.B
+  // }
 
   when (in.wflags) { // feq/flt/fle, fcvt
-    toint := (~in.rm & Cat(dcmp.io.lt, dcmp.io.eq)).orR | (toint_ieee >> minXLen << minXLen)
-    io.out.bits.exc := dcmp.io.exceptionFlags
+    toint := (~in.rm & Cat(lt, eq)).orR | (toint_ieee >> minXLen << minXLen)
     intType := false.B
 
     when (!in.ren2) { // fcvt
       val cvtType = in.typ.extract(log2Ceil(nIntTypes), 1)
       intType := cvtType
-      val conv = Module(new hardfloat.RecFNToIN(maxExpWidth, maxSigWidth, xLen))
-      conv.io.in := in.in1
-      conv.io.roundingMode := in.rm
-      conv.io.signedOut := ~in.typ(0)
-      toint := conv.io.out
-      io.out.bits.exc := Cat(conv.io.intExceptionFlags(2, 1).orR, 0.U(3.W), conv.io.intExceptionFlags(0))
+      for (t <- floatTypes) {
+        val decoder = Module(nrs.getDecoder(t.exp, t.sig))
+        val input = in.in1(t.ieeeWidth - 1, 0)
 
-      for (i <- 0 until nIntTypes-1) {
-        val w = minXLen << i
-        when (cvtType === i.U) {
-          val narrow = Module(new hardfloat.RecFNToIN(maxExpWidth, maxSigWidth, w))
-          narrow.io.in := in.in1
-          narrow.io.roundingMode := in.rm
-          narrow.io.signedOut := ~in.typ(0)
+        decoder.io.binary := input
 
-          val excSign = in.in1(maxExpWidth + maxSigWidth - 1) && !maxType.isNaN(in.in1)
-          val excOut = Cat(conv.io.signedOut === excSign, Fill(w-1, !excSign))
-          val invalid = conv.io.intExceptionFlags(2) || narrow.io.intExceptionFlags(1)
-          when (invalid) { toint := Cat(conv.io.out >> w, excOut) }
-          io.out.bits.exc := Cat(invalid, 0.U(3.W), !invalid && conv.io.intExceptionFlags(0))
+        for (i <- 0 until nIntTypes) {
+          val w = minXLen << i
+          val conv = Module(new FloatingPointToInteger(w, t.exp, t.sig - 1))
+          conv.io.floatingPoint := decoder.io.result
+          conv.io.roundingType := in.rm
+          conv.io.signOut := ~in.typ(0)
+
+          // Funny, I though tag should have been in.typeTagIn but if I do that is breaks out.store
+          when(cvtType === i.U && in.typeTagIn === typeTag(t).U) {
+            toint := conv.io.integer
+            intType := i.U
+          }
         }
       }
     }
   }
 
   io.out.valid := valid
-  io.out.bits.lt := dcmp.io.lt || (dcmp.io.a.asSInt < 0.S && dcmp.io.b.asSInt >= 0.S)
+  io.out.bits.lt := lt || (in.in1.asSInt < 0.S && in.in2.asSInt >= 0.S)
   io.out.bits.in := in
 }
 
@@ -907,7 +924,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   sfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.typeTagOut === S
   sfma.io.in.bits := fuInput(Some(sfma.t))
 
-  val fpiu = Module(new FPToInt)
+  val fpiu = Module(new FPToInt(cfg.nrs))
   fpiu.io.in.valid := req_valid && (ex_ctrl.toint || ex_ctrl.div || ex_ctrl.sqrt || (ex_ctrl.fastpipe && ex_ctrl.wflags))
   fpiu.io.in.bits := fuInput(None)
   io.store_data := fpiu.io.out.bits.store
