@@ -21,25 +21,36 @@ trait NRS {
 
   def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint
   def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint
+
+  def getZero(expWidth : Int, sigWidth : Int) : UInt
+  def getOne(expWidth : Int, sigWidth : Int) : UInt
 }
 
 object NRS_IEEE754 extends NRS {
   override def getInternalExponentSize(expWidth : Int, sigWidth : Int) : Int = {
-    IEEE754.internalFractionSize(expWidth, sigWidth - 1)
-  }
-
-  override def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int = {
     IEEE754.internalExponentSize(expWidth, sigWidth - 1)
   }
 
+  override def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int = {
+    IEEE754.internalFractionSize(expWidth, sigWidth - 1)
+  }
+
   override def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint = {
-    new EncoderIEEE754(expWidth, sigWidth - 1, None, expWidth, sigWidth - 1,
-      expWidth + sigWidth)
+    new EncoderIEEE754(expWidth, sigWidth - 1, None, getInternalExponentSize(expWidth, sigWidth),
+      getInternalFractionSize(expWidth, sigWidth), expWidth + sigWidth)
   }
 
   override def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint = {
-    new DecoderIEEE754(expWidth, sigWidth - 1, expWidth, sigWidth - 1,
-      expWidth + sigWidth)
+    new DecoderIEEE754(expWidth, sigWidth - 1, getInternalExponentSize(expWidth, sigWidth),
+      getInternalFractionSize(expWidth, sigWidth), expWidth + sigWidth)
+  }
+
+  override def getZero(expWidth : Int, sigWidth : Int) : UInt = {
+    0.U((expWidth + sigWidth).W)
+  }
+  
+  override def getOne(expWidth : Int, sigWidth : Int) : UInt = {
+    0.U(2.W) ## Fill(expWidth - 1, 1.U(1.W)) ## 0.U((sigWidth - 1).W)
   }
 }
 
@@ -485,7 +496,7 @@ class FPToInt(nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with Shou
   val valid = RegNext(io.in.valid)
 
   val comparators = floatTypes.map(t => {
-    val cmp = Module(new FloatingPointComparator(t.exp, t.sig - 1))
+    val cmp = Module(new FloatingPointComparator(nrs.getInternalExponentSize(t.exp, t.sig), nrs.getInternalFractionSize(t.exp, t.sig)))
     cmp
   })
 
@@ -540,7 +551,7 @@ class FPToInt(nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with Shou
 
         for (i <- 0 until nIntTypes) {
           val w = minXLen << i
-          val conv = Module(new FloatingPointToInteger(w, t.exp, t.sig - 1))
+          val conv = Module(new FloatingPointToInteger(w, nrs.getInternalExponentSize(t.exp, t.sig), nrs.getInternalFractionSize(t.exp, t.sig)))
           conv.io.floatingPoint := decoder.io.result
           conv.io.roundingType := in.rm
           conv.io.signOut := ~in.typ(0)
@@ -588,7 +599,7 @@ class IntToFP(val latency: Int, val nrs: NRS)(implicit p: Parameters) extends FP
     // could be improved for RVD/RVQ with a single variable-position rounding
     // unit, rather than N fixed-position ones
     val i2fResults = for (t <- floatTypes) yield {
-      val conv = Module(new IntegerToFloatingPoint(xLen, t.exp, t.sig - 1))
+      val conv = Module(new IntegerToFloatingPoint(xLen, nrs.getInternalExponentSize(t.exp, t.sig), nrs.getInternalFractionSize(t.exp, t.sig)))
       conv.io.integer := intValue
       conv.io.sign := ~in.bits.typ(0)
 
@@ -697,30 +708,22 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth))
     val decoder_c = Module(nrs.getDecoder(expWidth, sigWidth))
 
-    val floatingPoint_a = Wire(new FloatingPoint(expWidth, sigWidth - 1))
-    val floatingPoint_b = Wire(new FloatingPoint(expWidth, sigWidth - 1))
-    val floatingPoint_c = Wire(new FloatingPoint(expWidth, sigWidth - 1))
-
     decoder_a.io.binary := io.a
     decoder_b.io.binary := io.b
     decoder_c.io.binary := io.c
 
-    floatingPoint_a := decoder_a.io.result
-    floatingPoint_b := decoder_b.io.result
-    floatingPoint_c := decoder_c.io.result
-
-    val floatingPoint_result = Wire(new FloatingPoint(expWidth, sigWidth - 1))
+    val floatingPoint_result = Wire(new FloatingPoint(nrs.getInternalExponentSize(expWidth, sigWidth), nrs.getInternalFractionSize(expWidth, sigWidth)))
 
     floatingPoint_result := 0.U.asTypeOf(floatingPoint_result)
 
     when (io.op === 0.U) {
-        floatingPoint_result := floatingPoint_a * floatingPoint_b + floatingPoint_c
+        floatingPoint_result := decoder_a.io.result * decoder_b.io.result + decoder_c.io.result
     } .elsewhen (io.op === 1.U) {
-        floatingPoint_result := floatingPoint_a * floatingPoint_b - floatingPoint_c
+        floatingPoint_result := decoder_a.io.result * decoder_b.io.result - decoder_c.io.result
     } .elsewhen (io.op === 2.U) {
-        floatingPoint_result := -(floatingPoint_a * floatingPoint_b) + floatingPoint_c
+        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) + decoder_c.io.result
     } .otherwise {
-        floatingPoint_result := -(floatingPoint_a * floatingPoint_b) - floatingPoint_c
+        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) - decoder_c.io.result
     }
 
     val valid_stage0 = Wire(Bool())
@@ -757,8 +760,8 @@ class FPUFMAPipe(val latency: Int, val t: FType, nrs: NRS)
   val valid = RegNext(io.in.valid)
   val in = Reg(new FPInput)
   when (io.in.valid) {
-    val one = 1.U << (t.sig + t.exp - 1)
-    val zero = (io.in.bits.in1 ^ io.in.bits.in2) & (1.U << (t.sig + t.exp))
+    val one = nrs.getOne(t.exp, t.sig)
+    val zero = nrs.getZero(t.exp, t.sig)
     val cmd_fma = io.in.bits.ren3
     val cmd_addsub = io.in.bits.swap23
     in := io.in.bits
