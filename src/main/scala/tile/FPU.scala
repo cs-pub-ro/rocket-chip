@@ -19,11 +19,15 @@ trait NRS {
   def getInternalExponentSize(expWidth : Int, sigWidth : Int) : Int
   def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int
 
-  def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint
-  def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint
+  def getEncoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : EncoderFloatingPoint
+  def getDecoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : DecoderFloatingPoint
 
   def getZero(expWidth : Int, sigWidth : Int) : UInt
   def getOne(expWidth : Int, sigWidth : Int) : UInt
+
+  def getSignIdx(expWidth : Int, sigWidth : Int) : Int = {
+    expWidth + sigWidth - 1
+  }
 }
 
 object NRS_IEEE754 extends NRS {
@@ -35,14 +39,14 @@ object NRS_IEEE754 extends NRS {
     IEEE754.internalFractionSize(expWidth, sigWidth - 1)
   }
 
-  override def getEncoder(expWidth : Int, sigWidth : Int) : EncoderFloatingPoint = {
-    new EncoderIEEE754(expWidth, sigWidth - 1, None, getInternalExponentSize(expWidth, sigWidth),
-      getInternalFractionSize(expWidth, sigWidth), expWidth + sigWidth)
+  override def getEncoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : EncoderFloatingPoint = {
+    new EncoderIEEE754(expWidth, sigWidth - 1, None, internalExponentSize.getOrElse(getInternalExponentSize(expWidth, sigWidth)),
+      internalFractionSize.getOrElse(getInternalFractionSize(expWidth, sigWidth)), expWidth + sigWidth)
   }
 
-  override def getDecoder(expWidth : Int, sigWidth : Int) : DecoderFloatingPoint = {
-    new DecoderIEEE754(expWidth, sigWidth - 1, getInternalExponentSize(expWidth, sigWidth),
-      getInternalFractionSize(expWidth, sigWidth), expWidth + sigWidth)
+  override def getDecoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : DecoderFloatingPoint = {
+    new DecoderIEEE754(expWidth, sigWidth - 1, internalExponentSize.getOrElse(getInternalExponentSize(expWidth, sigWidth)),
+      internalFractionSize.getOrElse(getInternalFractionSize(expWidth, sigWidth)), expWidth + sigWidth)
   }
 
   override def getZero(expWidth : Int, sigWidth : Int) : UInt = {
@@ -371,24 +375,6 @@ trait HasFPUParameters {
   def D = typeTagGroup(FType.D)
   def I = typeTag(maxType).U
 
-  private def isBox(x: UInt, t: FType): Bool = x(t.sig + t.exp, t.sig + t.exp - 4).andR
-
-  private def box(x: UInt, xt: FType, y: UInt, yt: FType): UInt = {
-    // TODO See what this does
-    // require(xt.ieeeWidth == 2 * yt.ieeeWidth)
-    // val swizzledNaN = Cat(
-    //   x(xt.sig + xt.exp, xt.sig + xt.exp - 3),
-    //   x(xt.sig - 2, yt.recodedWidth - 1).andR,
-    //   x(xt.sig + xt.exp - 5, xt.sig),
-    //   y(yt.recodedWidth - 2),
-    //   x(xt.sig - 2, yt.recodedWidth - 1),
-    //   y(yt.recodedWidth - 1),
-    //   y(yt.recodedWidth - 3, 0))
-    // Mux(xt.isNaN(x), swizzledNaN, x)
-    x
-  }
-
-  // implement NaN unboxing for FU inputs
   def unbox(x: UInt, tag: UInt, exactType: Option[FType]): UInt = {
     val outType = exactType.getOrElse(maxType)
   
@@ -440,39 +426,11 @@ trait HasFPUParameters {
 
   // implement NaN boxing and recoding for FL*/fmv.*.x
   def recode(x: UInt, tag: UInt): UInt = {
-    // TODO make sure to check later
-    // def helper(x: UInt, t: FType): UInt = {
-    //   if (typeTag(t) == 0) {
-    //     t.recode(x)
-    //   } else {
-    //     val prevT = prevType(t)
-    //     box(t.recode(x), t, helper(x, prevT), prevT)
-    //   }
-    // }
-
-    // // fill MSBs of subword loads to emulate a wider load of a NaN-boxed value
-    // val boxes = floatTypes.map(
-    //   t => (if (t == maxType) 0.U(64.W) else Fill(maxType.ieeeWidth - t.ieeeWidth, 1.U(1.W)) << t.ieeeWidth))
-    // helper(boxes(tag) | x, maxType)
-
     box(x, tag)
   }
 
   // implement NaN unboxing and un-recoding for FS*/fmv.x.*
   def ieee(x: UInt, t: FType = maxType): UInt = {
-    // if (typeTag(t) == 0) {
-    //   t.ieee(x)
-    // } else {
-    //   val unrecoded = t.ieee(x)
-    //   val prevT = prevType(t)
-    //   val prevRecoded = Cat(
-    //     x(prevT.recodedWidth-2),
-    //     x(t.sig-1),
-    //     x(prevT.recodedWidth-3, 0))
-    //   val prevUnrecoded = ieee(prevRecoded, prevT)
-    //   Cat(unrecoded >> prevT.ieeeWidth, Mux(t.isNaN(x), prevUnrecoded, unrecoded(prevT.ieeeWidth-1, 0)))
-    // }
-
     unbox(x, typeTag(t).U, Some(t))
   }
 }
@@ -623,7 +581,7 @@ class IntToFP(val latency: Int, val nrs: NRS)(implicit p: Parameters) extends FP
   io.out <> Pipe(in.valid, mux, latency-1)
 }
 
-class FPToFP(val latency: Int)(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
+class FPToFP(val latency: Int, val nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with ShouldBeRetimed {
   val io = IO(new Bundle {
     val in = Flipped(Valid(new FPInput))
     val out = Valid(new FPResult)
@@ -633,50 +591,55 @@ class FPToFP(val latency: Int)(implicit p: Parameters) extends FPUModule()(p) wi
   val in = Pipe(io.in)
 
   val signNum = Mux(in.bits.rm(1), in.bits.in1 ^ in.bits.in2, Mux(in.bits.rm(0), ~in.bits.in2, in.bits.in2))
-  val fsgnj = Cat(signNum(fLen - 1), in.bits.in1(fLen-2, 0))
 
   val fsgnjMux = Wire(new FPResult)
   fsgnjMux.exc := 0.U
-  fsgnjMux.data := fsgnj
+  fsgnjMux.data := in.bits.in1
 
   when (in.bits.wflags) { // fmin/fmax
-    val isnan1 = maxType.isNaN(in.bits.in1)
-    val isnan2 = maxType.isNaN(in.bits.in2)
-    val isInvalid = maxType.isSNaN(in.bits.in1) || maxType.isSNaN(in.bits.in2)
-    val isNaNOut = isnan1 && isnan2
-    val isLHS = isnan2 || in.bits.rm(0) =/= io.lt && !isnan1
-    fsgnjMux.exc := isInvalid << 4
-    fsgnjMux.data := Mux(isNaNOut, maxType.qNaN, Mux(isLHS, in.bits.in1, in.bits.in2))
+    // TODO support for NAN values
+    val isLHS = in.bits.rm(0) =/= io.lt
+    fsgnjMux.exc := 0.U
+    fsgnjMux.data := Mux(isLHS, in.bits.in1, in.bits.in2)
   }
 
   val inTag = in.bits.typeTagIn
   val outTag = in.bits.typeTagOut
   val mux = WireDefault(fsgnjMux)
-  for (t <- floatTypes.init) {
-    when (outTag === typeTag(t).U) {
-      mux.data := Cat(fsgnjMux.data >> t.recodedWidth, maxType.unsafeConvert(fsgnjMux.data, t))
+  for (t <- floatTypes) {
+    val signIdx = nrs.getSignIdx(t.exp, t.sig)
+    when (outTag === typeTag(t).U && !in.bits.wflags) {
+      val mask = (1.U(1.W) << signIdx)
+      val newSign = signNum(signIdx)
+      mux.data := (fsgnjMux.data & ~mask) | newSign << signIdx
+    } .elsewhen(in.bits.wflags) {
+      mux.data := fsgnjMux.data
     }
   }
 
   when (in.bits.wflags && !in.bits.ren2) { // fcvt
     if (floatTypes.size > 1) {
-      // widening conversions simply canonicalize NaN operands
-      val widened = Mux(maxType.isNaN(in.bits.in1), maxType.qNaN, in.bits.in1)
-      fsgnjMux.data := widened
-      fsgnjMux.exc := maxType.isSNaN(in.bits.in1) << 4
+      for (outType <- floatTypes)
+        for (inType <- floatTypes) {
+          when (inTag === typeTag(inType).U && outTag === typeTag(outType).U) {
+            val decoder = Module(nrs.getDecoder(inType.exp, inType.sig,
+              Some(nrs.getInternalExponentSize(inType.exp, inType.sig)),
+              Some(nrs.getInternalFractionSize(inType.exp, inType.sig))))
+            
+            val encoder = Module(nrs.getEncoder(outType.exp, outType.sig,
+              Some(nrs.getInternalExponentSize(inType.exp, inType.sig)),
+              Some(nrs.getInternalFractionSize(inType.exp, inType.sig))))
 
-      // narrowing conversions require rounding (for RVQ, this could be
-      // optimized to use a single variable-position rounding unit, rather
-      // than two fixed-position ones)
-      for (outType <- floatTypes.init) when (outTag === typeTag(outType).U && ((typeTag(outType) == 0).B || outTag < inTag)) {
-        val narrower = Module(new hardfloat.RecFNToRecFN(maxType.exp, maxType.sig, outType.exp, outType.sig))
-        narrower.io.in := in.bits.in1
-        narrower.io.roundingMode := in.bits.rm
-        narrower.io.detectTininess := hardfloat.consts.tininess_afterRounding
-        val narrowed = sanitizeNaN(narrower.io.out, outType)
-        mux.data := Cat(fsgnjMux.data >> narrowed.getWidth, narrowed)
-        mux.exc := narrower.io.exceptionFlags
-      }
+            decoder.io.binary := in.bits.in1
+            encoder.io.floatingPoint := decoder.io.result
+            encoder.io.roundingType match {
+              case Some(r) => r := in.bits.rm
+              case None => 
+            }
+            mux.data := encoder.io.binary
+            mux.exc := 0.U
+          }
+        }
     }
   }
 
@@ -942,7 +905,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   ifpu.io.in.bits := fpiu.io.in.bits
   ifpu.io.in.bits.in1 := Mux(ex_cp_valid, io.cp_req.bits.in1, io.fromint_data)
 
-  val fpmu = Module(new FPToFP(cfg.fpmuLatency))
+  val fpmu = Module(new FPToFP(cfg.fpmuLatency, cfg.nrs))
   fpmu.io.in.valid := req_valid && ex_ctrl.fastpipe
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
