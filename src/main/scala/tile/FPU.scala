@@ -748,6 +748,86 @@ class FPUFMAPipe(val latency: Int, val t: FType, nrs: NRS)
   io.out := Pipe(fma.io.validout, res, (latency-3) max 0)
 }
 
+class NrshglDivSqrt(expWidth: Int, sigWidth: Int, nrs: NRS) extends Module {
+
+  val io = IO(new Bundle {
+      val inValid = Input(Bool())
+      val sqrtOp = Input(Bool())
+      val a = Input(Bits((expWidth + sigWidth).W))
+      val b = Input(Bits((expWidth + sigWidth).W))
+      val roundingMode = Input(UInt(3.W))
+
+      val inReady = Output(Bool())
+      val out = Output(Bits((expWidth + sigWidth).W))
+      val exceptionFlags = Output(Bits(5.W))
+      val outValid_sqrt = Output(Bool())
+      val outValid_div = Output(Bool())
+  })
+
+  val idle :: computing :: done :: Nil = Enum(3)
+  val state = RegInit(idle)
+
+  val isSqrt = RegInit(false.B)
+  when (io.inValid && state === idle) {
+    isSqrt := io.sqrtOp
+  }
+
+  val decoder_a = Module(nrs.getDecoder(expWidth, sigWidth))
+  decoder_a.io.binary := io.a
+  val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth))
+  decoder_b.io.binary := io.b
+
+  val div = Module(new FloatingPointDivider(nrs.getInternalExponentSize(expWidth, sigWidth),
+    nrs.getInternalFractionSize(expWidth, sigWidth))) 
+
+  div.io.operand1 := decoder_a.io.result
+  div.io.operand2 := decoder_b.io.result
+
+  val sqrt = Module(new FloatingPointSquareRoot(nrs.getInternalExponentSize(expWidth, sigWidth),
+    nrs.getInternalFractionSize(expWidth, sigWidth)))
+  sqrt.io.operand := decoder_a.io.result
+
+  val cycleCounter = RegInit(0.U(8.W))
+  val divCycles = 8.U
+  val sqrtCycles = 10.U
+
+  switch (state) {
+    is (idle) {
+      when (io.inValid) {
+        state := computing
+        cycleCounter := 0.U
+      }
+    }
+    
+    is (computing) {
+      cycleCounter := cycleCounter + 1.U
+      
+      when (isSqrt && cycleCounter === sqrtCycles) {
+        state := done
+      } .elsewhen (!isSqrt && cycleCounter === divCycles) {
+        state := done
+      }
+    }
+    
+    is (done) {
+      state := idle
+    }
+  }
+
+  val encoder = Module(nrs.getEncoder(expWidth, sigWidth))
+  encoder.io.floatingPoint := Mux(io.sqrtOp, sqrt.io.result, div.io.result)
+  encoder.io.roundingType match {
+    case Some(r) => r := io.roundingMode
+    case None =>
+  }
+  
+  io.out := encoder.io.binary
+  io.exceptionFlags := 0.U
+  io.inReady := state === idle
+  io.outValid_sqrt := state === done && isSqrt
+  io.outValid_div := state === done && !isSqrt
+}
+
 class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   val io = IO(new FPUIO)
 
@@ -1041,19 +1121,18 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
     for (t <- floatTypes) {
       val tag = mem_ctrl.typeTagOut
-      val divSqrt = withReset(divSqrt_killed) { Module(new hardfloat.DivSqrtRecFN_small(t.exp, t.sig, 0)) }
+      val divSqrt = withReset(divSqrt_killed) { Module(new NrshglDivSqrt(t.exp, t.sig, cfg.nrs)) }
       divSqrt.io.inValid := divSqrt_inValid && tag === typeTag(t).U
       divSqrt.io.sqrtOp := mem_ctrl.sqrt
-      divSqrt.io.a := maxType.unsafeConvert(fpiu.io.out.bits.in.in1, t)
-      divSqrt.io.b := maxType.unsafeConvert(fpiu.io.out.bits.in.in2, t)
+      divSqrt.io.a := fpiu.io.out.bits.in.in1(t.ieeeWidth - 1, 0)
+      divSqrt.io.b := fpiu.io.out.bits.in.in2(t.ieeeWidth - 1, 0)
       divSqrt.io.roundingMode := fpiu.io.out.bits.in.rm
-      divSqrt.io.detectTininess := hardfloat.consts.tininess_afterRounding
 
       when (!divSqrt.io.inReady) { divSqrt_inFlight := true.B } // only 1 in flight
 
       when (divSqrt.io.outValid_div || divSqrt.io.outValid_sqrt) {
         divSqrt_wen := !divSqrt_killed
-        divSqrt_wdata := sanitizeNaN(divSqrt.io.out, t)
+        divSqrt_wdata := box(divSqrt.io.out, t)
         divSqrt_flags := divSqrt.io.exceptionFlags
         divSqrt_typeTag := typeTag(t).U
       }
