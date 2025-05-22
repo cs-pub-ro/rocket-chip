@@ -667,15 +667,18 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
 
-    val decoder_a = Module(nrs.getDecoder(expWidth, sigWidth))
-    val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth))
-    val decoder_c = Module(nrs.getDecoder(expWidth, sigWidth))
+    val accumulatorExponentSize = nrs.getInternalExponentSize(expWidth, sigWidth) + 3
+    val accumulatorFractionSize = nrs.getInternalFractionSize(expWidth, sigWidth) * 2
+
+    val decoder_a = Module(nrs.getDecoder(expWidth, sigWidth, Some(accumulatorExponentSize), Some(accumulatorFractionSize)))
+    val decoder_b = Module(nrs.getDecoder(expWidth, sigWidth, Some(accumulatorExponentSize), Some(accumulatorFractionSize)))
+    val decoder_c = Module(nrs.getDecoder(expWidth, sigWidth, Some(accumulatorExponentSize), Some(accumulatorFractionSize)))
 
     decoder_a.io.binary := io.a
     decoder_b.io.binary := io.b
     decoder_c.io.binary := io.c
 
-    val floatingPoint_result = Wire(new FloatingPoint(nrs.getInternalExponentSize(expWidth, sigWidth), nrs.getInternalFractionSize(expWidth, sigWidth)))
+    val floatingPoint_result = Wire(new FloatingPoint(accumulatorExponentSize, accumulatorFractionSize))
 
     floatingPoint_result := 0.U.asTypeOf(floatingPoint_result)
 
@@ -684,19 +687,17 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     } .elsewhen (io.op === 1.U) {
         floatingPoint_result := decoder_a.io.result * decoder_b.io.result - decoder_c.io.result
     } .elsewhen (io.op === 2.U) {
-        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) + decoder_c.io.result
+        floatingPoint_result := -decoder_a.io.result * decoder_b.io.result + decoder_c.io.result
     } .otherwise {
-        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) - decoder_c.io.result
+        floatingPoint_result := -decoder_a.io.result * decoder_b.io.result - decoder_c.io.result
     }
 
     val valid_stage0 = Wire(Bool())
-    // TODO: add support for exception flags
-    // val roundingMode_stage0 = Wire(UInt(3.W))
 
     val postmul_regs = if(latency>0) 1 else 0
     valid_stage0                             := Pipe(io.validin, false.B, postmul_regs).valid
 
-    val encoder = Module(nrs.getEncoder(expWidth, sigWidth))
+    val encoder = Module(nrs.getEncoder(expWidth, sigWidth, Some(accumulatorExponentSize), Some(accumulatorFractionSize)))
     encoder.io.floatingPoint := floatingPoint_result
     encoder.io.roundingType match {
       case Some(r) => r := io.roundingMode
