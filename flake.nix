@@ -3,10 +3,12 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Add a new input specifically for newer packages
+    newerNixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small"; # More up-to-date
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }@inputs:
+  outputs = { self, nixpkgs, newerNixpkgs, flake-utils }@inputs:
     let
       overlay = import ./overlay.nix;
     in
@@ -14,6 +16,18 @@
       (system:
       let
         pkgs = import nixpkgs { inherit system; overlays = [ overlay ]; };
+        newerPkgs = import newerNixpkgs { inherit system; };
+        
+        clang19 = newerPkgs.llvmPackages_19.clang;
+        libcxx19 = newerPkgs.llvmPackages_19.libcxx;
+        
+        clang19Wrapper = pkgs.writeShellScriptBin "clang-19" ''
+          exec "${clang19}/bin/clang" "$@"
+        '';
+        clangpp19Wrapper = pkgs.writeShellScriptBin "clang++-19" ''
+          exec "${clang19}/bin/clang++" "$@"
+        '';
+        
         deps = with pkgs; [
           git
           gnumake autoconf automake
@@ -33,7 +47,7 @@
         {
           legacyPackages = pkgs;
           devShell = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-            buildInputs = deps;
+            buildInputs = deps ++ [ clang19 clang19Wrapper clangpp19Wrapper ];
             SPIKE_ROOT = "${pkgs.spike}";
             RISCV_TESTS_ROOT = "${pkgs.riscvTests}";
             RV64_TOOLCHAIN_ROOT = "${pkgs.pkgsCross.riscv64-embedded.buildPackages.gcc}";
