@@ -365,6 +365,8 @@ trait Emulator extends Cross.Module2[String, String] {
 
 /** object to elaborate verilated emulators. */
 object emulator extends Cross[Emulator](
+  ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultConfigPosit"),
+
   // RocketSuiteA
   ("freechips.rocketchip.system.TestHarness", "freechips.rocketchip.system.DefaultConfig"),
   // RocketSuiteB

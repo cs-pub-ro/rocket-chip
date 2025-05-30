@@ -97,7 +97,7 @@ case class FPUParams(
   dfmaLatency: Int = 4,
   fpmuLatency: Int = 2,
   ifpuLatency: Int = 2,
-  nrs: NRS = NRS_POSIT,
+  nrs: NRS = NRS_IEEE754,
 )
 
 object FPConstants
@@ -718,9 +718,9 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
     } .elsewhen (io.op === 1.U) {
         floatingPoint_result := decoder_a.io.result * decoder_b.io.result - decoder_c.io.result
     } .elsewhen (io.op === 2.U) {
-        floatingPoint_result := -decoder_a.io.result * decoder_b.io.result + decoder_c.io.result
+        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) + decoder_c.io.result
     } .otherwise {
-        floatingPoint_result := -decoder_a.io.result * decoder_b.io.result - decoder_c.io.result
+        floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) - decoder_c.io.result
     }
 
     val valid_stage0 = Wire(Bool())

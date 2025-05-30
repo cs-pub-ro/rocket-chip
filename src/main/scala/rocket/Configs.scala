@@ -10,6 +10,7 @@ import freechips.rocketchip.subsystem.{TilesLocated, NumTiles, HierarchicalLocat
 import freechips.rocketchip.tile.{RocketTileParams, RocketTileBoundaryBufferParams, FPUParams}
 import freechips.rocketchip.util.{RationalDirection, Flexible}
 import scala.reflect.ClassTag
+import freechips.rocketchip.tile.NRS
 
 // All the user-level bells and whistles
 class WithNHugeCores(
@@ -287,6 +288,7 @@ class WithNoSimulationTimeout extends RocketCoreConfig(_.copy(haveSimTimeout = f
 class WithDebugROB(enable: Boolean = true, size: Int = 0) extends RocketCoreConfig(_.copy(debugROB = Option.when(enable)(DebugROBParams(size))))
 
 // FPU configs
+class WithNRS(nrs: NRS) extends RocketCoreConfig(c => c.copy(fpu = c.fpu.map(_.copy(nrs = nrs))))
 class WithoutFPU            extends RocketCoreConfig(_.copy(fpu = None))
 class WithFP16              extends RocketCoreConfig(c => c.copy(fpu = c.fpu.map(_.copy(minFLen = 16))))
 class WithFPUWithoutDivSqrt extends RocketCoreConfig(c => c.copy(fpu = c.fpu.map(_.copy(divSqrt = false))))

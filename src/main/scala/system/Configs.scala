@@ -6,6 +6,8 @@ package freechips.rocketchip.system
 import org.chipsalliance.cde.config.Config
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.rocket.{WithNBigCores, WithNMedCores, WithNSmallCores, WithRV32, WithFP16, WithHypervisor, With1TinyCore, WithScratchpadsOnly, WithCloneRocketTiles, WithB}
+import freechips.rocketchip.tile.NRS_POSIT
+import freechips.rocketchip.rocket.WithNRS
 
 class WithJtagDTMSystem extends freechips.rocketchip.subsystem.WithJtagDTM
 class WithDebugSBASystem extends freechips.rocketchip.subsystem.WithDebugSBA
@@ -22,6 +24,8 @@ class BaseConfig extends Config(
 )
 
 class DefaultConfig extends Config(new WithNBigCores(1) ++ new WithCoherentBusTopology ++ new BaseConfig)
+
+class DefaultConfigPosit extends Config(new WithNRS(NRS_POSIT) ++ new DefaultConfig)
 
 class DefaultBufferlessConfig extends Config(new WithBufferlessBroadcastHub ++ new DefaultConfig)
 class DefaultSmallConfig extends Config(new WithNSmallCores(1) ++ new WithCoherentBusTopology ++ new BaseConfig)
