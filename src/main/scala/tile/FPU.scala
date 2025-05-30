@@ -58,6 +58,37 @@ object NRS_IEEE754 extends NRS {
   }
 }
 
+object NRS_POSIT extends NRS {
+  private def EXP = 2
+  override def getInternalExponentSize(expWidth : Int, sigWidth : Int) : Int = {
+    Posit.internalExponentSize(EXP, expWidth + sigWidth)
+  }
+
+  override def getInternalFractionSize(expWidth : Int, sigWidth : Int) : Int = {
+    Posit.internalFractionSize(EXP, expWidth + sigWidth)
+  }
+
+  override def getEncoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : EncoderFloatingPoint = {
+    new EncoderPosit(EXP, expWidth + sigWidth, None,
+      internalExponentSize.getOrElse(getInternalExponentSize(expWidth, sigWidth)),
+      internalFractionSize.getOrElse(getInternalFractionSize(expWidth, sigWidth)))
+  }
+
+  override def getDecoder(expWidth : Int, sigWidth : Int, internalExponentSize : Option[Int] = None, internalFractionSize : Option[Int] = None) : DecoderFloatingPoint = {
+    new DecoderPosit(EXP, expWidth + sigWidth,
+      internalExponentSize.getOrElse(getInternalExponentSize(expWidth, sigWidth)),
+      internalFractionSize.getOrElse(getInternalFractionSize(expWidth, sigWidth)))
+  }
+
+  override def getZero(expWidth : Int, sigWidth : Int) : UInt = {
+    0.U((expWidth + sigWidth).W)
+  }
+  
+  override def getOne(expWidth : Int, sigWidth : Int) : UInt = {
+    0.U(1.W) ## 1.U(1.W) ## 0.U((expWidth + sigWidth - 2).W)
+  }
+}
+
 case class FPUParams(
   minFLen: Int = 32,
   fLen: Int = 64,
@@ -66,7 +97,7 @@ case class FPUParams(
   dfmaLatency: Int = 4,
   fpmuLatency: Int = 2,
   ifpuLatency: Int = 2,
-  nrs: NRS = NRS_IEEE754,
+  nrs: NRS = NRS_POSIT,
 )
 
 object FPConstants
