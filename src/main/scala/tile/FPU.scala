@@ -545,7 +545,6 @@ class FPToInt(nrs: NRS)(implicit p: Parameters) extends FPUModule()(p) with Shou
           conv.io.roundingType := in.rm
           conv.io.signOut := ~in.typ(0)
 
-          // Funny, I though tag should have been in.typeTagIn but if I do that is breaks out.store
           when(cvtType === i.U && in.typeTagIn === typeTag(t).U) {
             toint := conv.io.integer
             intType := i.U
