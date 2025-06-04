@@ -723,23 +723,27 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int, nrs: NRS) exte
         floatingPoint_result := -(decoder_a.io.result * decoder_b.io.result) - decoder_c.io.result
     }
 
-    val valid_stage0 = Wire(Bool())
-
-    val postmul_regs = if(latency>0) 1 else 0
-    valid_stage0                             := Pipe(io.validin, false.B, postmul_regs).valid
+    val postmulLatency = if (latency > 0) 1 else 0
+    val stage1 = Pipe(io.validin, floatingPoint_result, postmulLatency)
+    val stage1Valid = Pipe(io.validin, false.B, postmulLatency).valid
+    val stage1RM = Pipe(io.validin, io.roundingMode, postmulLatency)
 
     val encoder = Module(nrs.getEncoder(expWidth, sigWidth, Some(accumulatorExponentSize), Some(accumulatorFractionSize)))
-    encoder.io.floatingPoint := floatingPoint_result
+
+    val roundLatency = if (latency == 2) 1 else 0
+    val stage2 = Pipe(stage1Valid, stage1.bits, roundLatency)
+    val stage2RM = Pipe(stage1Valid, stage1RM.bits, roundLatency)
+    val stage2Valid = Pipe(stage1Valid, false.B, roundLatency).valid
+
+    encoder.io.floatingPoint := stage2.bits
     encoder.io.roundingType match {
-      case Some(r) => r := io.roundingMode
+      case Some(r) => r := stage2RM.bits
       case None => 
     }
 
-    val round_regs = if(latency==2) 1 else 0
-    io.validout                             := Pipe(valid_stage0, false.B, round_regs).valid
-
     io.out            := encoder.io.binary
     io.exceptionFlags := 0.U
+    io.validout := stage2Valid
 }
 
 class FPUFMAPipe(val latency: Int, val t: FType, nrs: NRS)
