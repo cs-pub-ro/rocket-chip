@@ -639,9 +639,22 @@ class FPToFP(val latency: Int, val nrs: NRS)(implicit p: Parameters) extends FPU
   for (t <- floatTypes) {
     val signIdx = nrs.getSignIdx(t.exp, t.sig)
     when (outTag === typeTag(t).U && !in.bits.wflags) {
-      val mask = (1.U(1.W) << signIdx)
       val newSign = signNum(signIdx)
-      mux.data := (fsgnjMux.data & ~mask) | newSign << signIdx
+
+      val floatingPoint = Wire(new FloatingPoint(nrs.getInternalExponentSize(t.exp, t.sig), nrs.getInternalFractionSize(t.exp, t.sig)))
+      val decoder = Module(nrs.getDecoder(t.exp, t.sig))
+      decoder.io.binary := in.bits.in1
+      floatingPoint := decoder.io.result
+      
+      floatingPoint.sign := newSign
+
+      val encoder = Module(nrs.getEncoder(t.exp, t.sig))
+      encoder.io.floatingPoint := floatingPoint
+      encoder.io.roundingType match {
+        case Some(r) => r := in.bits.rm
+        case None => 
+      }
+      mux.data := encoder.io.binary
     } .elsewhen(in.bits.wflags) {
       mux.data := fsgnjMux.data
     }
