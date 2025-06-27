@@ -18,17 +18,46 @@
         pkgs = import nixpkgs { inherit system; overlays = [ overlay ]; };
         newerPkgs = import newerNixpkgs { inherit system; };
         
-        clang19 = newerPkgs.llvmPackages_19.clang;
-        libcxx19 = newerPkgs.llvmPackages_19.libcxx;
+        llvmPackages19 = newerPkgs.llvmPackages_19;
         
-        clang19Wrapper = pkgs.writeShellScriptBin "clang-19" ''
-          exec "${clang19}/bin/clang" "$@"
+        # List of LLVM tools to wrap with -19 suffix
+        llvmTools = [
+          "clang"
+          "clang++"
+          "llvm-config"
+          "llvm-ar"
+          "llvm-as"
+          "llvm-dis"
+          "llvm-link"
+          "llvm-nm"
+          "llvm-objcopy"
+          "llvm-objdump"
+          "llvm-ranlib"
+          "llvm-readelf"
+          "llvm-size"
+          "llvm-strip"
+          "ld.lld"
+          "lld"
+          "opt"
+        ];
+        
+        # Function to create wrapper for a tool
+        createLLVMWrapper = toolName: let
+          # Determine which package contains the tool
+          toolPackage = if (toolName == "clang" || toolName == "clang++") then llvmPackages19.clang
+                       else if (toolName == "ld.lld" || toolName == "lld") then llvmPackages19.lld
+                       else llvmPackages19.llvm;
+          # Handle special case for clang++
+          actualToolName = if toolName == "clang++" then "clang++" else toolName;
+        in pkgs.writeShellScriptBin "${toolName}-19" ''
+          exec "${toolPackage}/bin/${actualToolName}" "$@"
         '';
-        clangpp19Wrapper = pkgs.writeShellScriptBin "clang++-19" ''
-          exec "${clang19}/bin/clang++" "$@"
-        '';
+        
+        # Create all LLVM wrappers
+        llvmWrappers = map createLLVMWrapper llvmTools;
         
         deps = with pkgs; [
+          jdk17
           git
           gnumake autoconf automake
           mill
@@ -47,10 +76,15 @@
         {
           legacyPackages = pkgs;
           devShell = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-            buildInputs = deps ++ [ clang19 clang19Wrapper clangpp19Wrapper ];
+            buildInputs = deps ++ [ 
+              llvmPackages19.clang 
+              llvmPackages19.llvm 
+              llvmPackages19.lld 
+            ] ++ llvmWrappers;
             SPIKE_ROOT = "${pkgs.spike}";
             RISCV_TESTS_ROOT = "${pkgs.riscvTests}";
             RV64_TOOLCHAIN_ROOT = "${pkgs.pkgsCross.riscv64-embedded.buildPackages.gcc}";
+            JAVA_HOME = "${pkgs.jdk17.home}";
             shellHook = ''
               # Tells pip to put packages into $PIP_PREFIX instead of the usual locations.
               # See https://pip.pypa.io/en/stable/user_guide/#environment-variables.
