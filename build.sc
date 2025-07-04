@@ -71,6 +71,25 @@ trait Hardfloat
   def repositoriesTask = T.task(super.repositoriesTask() ++ v.sonatypesSnapshots)
 }
 
+object fixedpoint extends Cross[FixedPoint](v.chiselCrossVersions.keys.toSeq)
+
+trait FixedPoint
+  extends millbuild.dependencies.nrshgl.common.FixedPointModule
+    with RocketChipPublishModule
+    with Cross.Module[String] {
+  override def scalaVersion = T(v.scala)
+
+  override def millSourcePath = os.pwd / "dependencies" / "nrshgl" / "fixedpoint"
+
+  def chiselModule = None
+
+  def chiselPluginJar = None
+
+  def chiselIvy = Some(v.chiselCrossVersions(crossValue)._1)
+
+  def chiselPluginIvy = Some(v.chiselCrossVersions(crossValue)._2)
+}
+
 object nrshgl extends mill.define.Cross[Nrshgl](v.chiselCrossVersions.keys.toSeq)
 
 trait Nrshgl
@@ -91,6 +110,8 @@ trait Nrshgl
   def chiselPluginIvy = Option.when(crossValue != "source")(v.chiselCrossVersions(crossValue)._2)
 
   def repositoriesTask = T.task(super.repositoriesTask() ++ v.sonatypesSnapshots)
+
+  override def fixedpointModule: ScalaModule = fixedpoint(crossValue)
 }
 
 object cde extends CDE
