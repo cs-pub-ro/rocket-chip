@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+# nrs-dis: list and decode the custom NRS instructions in a RISC-V ELF.
+# The stock disassembler only prints them as raw ".4byte" words because the
+# opcode (0x2b, custom-1) is not in its tables. This decodes the fields.
+import subprocess, sys, re
+
+FORMATS = {0:"morris(4,32)", 1:"morris-heb(4,32)", 2:"morris-bias-heb(4,32)",
+           3:"posit(32,es2)", 4:"posit(32,es3)", 5:"morris-unary(32)"}
+OPS = {0:"add",1:"sub",2:"mul",3:"div",4:"sqrt",5:"feq",6:"flt",7:"fle",
+       8:"fmin",9:"fmax",10:"fsgnj",11:"fsgnjn",12:"fsgnjx",13:"cvt.w",14:"cvt.s"}
+
+def freg(n): return f"f{n}"
+
+def decode(word):
+    op   = (word >> 25) & 0x7f
+    rs2  = (word >> 20) & 0x1f
+    rs1  = (word >> 15) & 0x1f
+    nrs  = (word >> 12) & 0x07
+    rd   = (word >>  7) & 0x1f
+    return op, nrs, rd, rs1, rs2
+
+def trace():
+    # Read a live +verbose commit trace on stdin. Print a cycle heartbeat so the
+    # window is visibly advancing through real execution, and when the custom
+    # instruction commits, show the surrounding raw trace (operands loaded -> op
+    # -> result stored) plus the decoded field meaning.
+    cyc_re  = re.compile(r'C0:\s+(\d+)')
+    inst_re = re.compile(r'inst=\[([0-9a-f]{8})\]')
+    HEARTBEAT = 250000
+    print("streaming the commit trace from the NRS core (cycle-accurate)\n", flush=True)
+    last = 0
+    ring = []                                   # last few raw lines, for context
+    for line in sys.stdin:
+        cm = cyc_re.search(line)
+        if not cm: continue
+        cyc = int(cm.group(1))
+        ring.append(line.rstrip())
+        if len(ring) > 4: ring.pop(0)
+        if cyc - last >= HEARTBEAT:
+            print(f"  cycle {cyc:>10,}  executing...", flush=True)
+            last = cyc
+        im = inst_re.search(line)
+        if im and (int(im.group(1), 16) & 0x7f) == 0x2b:
+            word = int(im.group(1), 16)
+            op, nrs, rd, rs1, rs2 = decode(word)
+            print(f"\n  custom instruction commits at cycle {cyc:,}:", flush=True)
+            for r in ring:                      # real surrounding instructions
+                print("    " + r, flush=True)
+            print(f"\n  -> 0x{word:08x} = {FORMATS.get(nrs,'?')} {OPS.get(op,'?')}"
+                  f"  reaches the NRS unit\n", flush=True)
+
+SLICE = {  # section name -> (start marker inst word, end marker inst word)
+    "sw": ("01104013", "02204013"),
+    "hw": ("03304013", "04404013"),
+}
+
+def slice_section(name, path):
+    # Print every committed instruction the given multiply executed, taken
+    # straight from the +verbose commit trace between its two markers.
+    # Pipe to `wc -l` to count them. `--nrs` keeps only the custom NRS op.
+    start, end = SLICE[name]
+    only_nrs = "--nrs" in sys.argv
+    inside = False
+    with open(path, errors="replace") as f:
+        for line in f:
+            if f"inst=[{start}]" in line: inside = True; continue
+            if f"inst=[{end}]"   in line: inside = False; continue
+            if inside and "C0:" in line:
+                if only_nrs:
+                    m = re.search(r'inst=\[([0-9a-f]{8})\]', line)
+                    if not m or (int(m.group(1),16) & 0x7f) != 0x2b: continue
+                sys.stdout.write(line)
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit("usage:\n  nrs-dis <elf>\n  nrs-dis --trace            (filter +verbose on stdin)\n"
+                 "  nrs-dis --slice sw|hw <trace>  (print one multiply's instructions; pipe to wc -l)")
+    if sys.argv[1] == "--trace":
+        return trace()
+    if sys.argv[1] == "--slice":
+        return slice_section(sys.argv[2], sys.argv[3])
+    elf = sys.argv[1]
+    out = subprocess.check_output(["riscv64-unknown-elf-objdump","-d",elf],
+                                  text=True)
+    rows = []
+    for line in out.splitlines():
+        m = re.match(r'\s*([0-9a-f]+):\s+([0-9a-f]{8})\s', line)
+        if not m: continue
+        word = int(m.group(2), 16)
+        if (word & 0x7f) != 0x2b:        # opcode custom-1
+            continue
+        op, nrs, rd, rs1, rs2 = decode(word)
+        rows.append((m.group(1), m.group(2),
+                     FORMATS.get(nrs, f"nrs{nrs}"),
+                     OPS.get(op, f"op{op}"),
+                     freg(rd), freg(rs1), freg(rs2)))
+    if not rows:
+        print(f"no custom NRS instructions in {elf}")
+        return
+    print(f"custom NRS instructions in {elf}  (opcode 0x2b, custom-1)\n")
+    print(f"  {'addr':<9}{'encoding':<12}{'format':<22}{'op':<6}{'rd':<5}{'rs1':<5}rs2")
+    for a,w,f,o,rd,rs1,rs2 in rows:
+        print(f"  0x{a:<7}0x{w:<10}{f:<22}{o:<6}{rd:<5}{rs1:<5}{rs2}")
+
+if __name__ == "__main__":
+    main()

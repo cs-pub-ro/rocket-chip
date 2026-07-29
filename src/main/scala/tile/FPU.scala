@@ -89,6 +89,69 @@ object NRS_POSIT extends NRS {
   }
 }
 
+// ── NRS types selected at runtime by the custom instruction's NRS_ID (funct3) ──
+// getZero/getOne are only used by the FMA pipe (cfg.nrs); these types are driven
+// only through NRSUnit, so getOne is a placeholder.
+
+object NRS_POSIT_ES3 extends NRS {
+  private def EXP = 3
+  override def getInternalExponentSize(e: Int, s: Int): Int = Posit.internalExponentSize(EXP, e + s)
+  override def getInternalFractionSize(e: Int, s: Int): Int = Posit.internalFractionSize(EXP, e + s)
+  override def getEncoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): EncoderFloatingPoint =
+    new EncoderPosit(EXP, e + s, Some(RoundEven), ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getDecoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): DecoderFloatingPoint =
+    new DecoderPosit(EXP, e + s, ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getZero(e: Int, s: Int): UInt = 0.U((e + s).W)
+  override def getOne(e: Int, s: Int): UInt  = 0.U(1.W) ## 1.U(1.W) ## 0.U((e + s - 2).W)
+}
+
+object NRS_MORRIS extends NRS {
+  private val G = 4
+  override def getInternalExponentSize(e: Int, s: Int): Int = Morris.internalExponentSize(G, e + s)
+  override def getInternalFractionSize(e: Int, s: Int): Int = Morris.internalFractionSize(G, e + s)
+  override def getEncoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): EncoderFloatingPoint =
+    new EncoderMorris(G, e + s, Some(RoundZero), ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getDecoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): DecoderFloatingPoint =
+    new DecoderMorris(G, e + s, ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getZero(e: Int, s: Int): UInt = 0.U((e + s).W)
+  override def getOne(e: Int, s: Int): UInt  = 0.U((e + s).W)
+}
+
+object NRS_MORRIS_HEB extends NRS {
+  private val G = 4
+  override def getInternalExponentSize(e: Int, s: Int): Int = MorrisHEB.internalExponentSize(G, e + s)
+  override def getInternalFractionSize(e: Int, s: Int): Int = MorrisHEB.internalFractionSize(G, e + s)
+  override def getEncoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): EncoderFloatingPoint =
+    new EncoderMorrisHEB(G, e + s, Some(RoundZero), ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getDecoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): DecoderFloatingPoint =
+    new DecoderMorrisHEB(G, e + s, ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getZero(e: Int, s: Int): UInt = 0.U((e + s).W)
+  override def getOne(e: Int, s: Int): UInt  = 0.U((e + s).W)
+}
+
+object NRS_MORRIS_BIAS_HEB extends NRS {
+  private val G = 4
+  override def getInternalExponentSize(e: Int, s: Int): Int = MorrisBiasHEB.internalExponentSize(G, e + s)
+  override def getInternalFractionSize(e: Int, s: Int): Int = MorrisBiasHEB.internalFractionSize(G, e + s)
+  override def getEncoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): EncoderFloatingPoint =
+    new EncoderMorrisBiasHEB(G, e + s, Some(RoundEven), ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getDecoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): DecoderFloatingPoint =
+    new DecoderMorrisBiasHEB(G, e + s, ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getZero(e: Int, s: Int): UInt = 0.U((e + s).W)
+  override def getOne(e: Int, s: Int): UInt  = 0.U((e + s).W)
+}
+
+object NRS_MORRIS_UNARY_HEB extends NRS {
+  override def getInternalExponentSize(e: Int, s: Int): Int = MorrisUnaryHEB.internalExponentSize(e + s)
+  override def getInternalFractionSize(e: Int, s: Int): Int = MorrisUnaryHEB.internalFractionSize(e + s)
+  override def getEncoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): EncoderFloatingPoint =
+    new EncoderMorrisUnaryHEB(e + s, Some(RoundEven), ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getDecoder(e: Int, s: Int, ie: Option[Int] = None, ifr: Option[Int] = None): DecoderFloatingPoint =
+    new DecoderMorrisUnaryHEB(e + s, ie.getOrElse(getInternalExponentSize(e, s)), ifr.getOrElse(getInternalFractionSize(e, s)))
+  override def getZero(e: Int, s: Int): UInt = 0.U((e + s).W)
+  override def getOne(e: Int, s: Int): UInt  = 0.U((e + s).W)
+}
+
 case class FPUParams(
   minFLen: Int = 32,
   fLen: Int = 64,
@@ -124,6 +187,7 @@ trait HasFPUCtrlSigs {
   val sqrt = Bool()
   val wflags = Bool()
   val vec = Bool()
+  val nrs = Bool()  // custom NRS op (opcode 0101011); decoded outside the main table
 }
 
 class FPUCtrlSigs extends Bundle with HasFPUCtrlSigs
@@ -253,6 +317,31 @@ class FPUDecoder(implicit p: Parameters) extends FPUModule()(p) {
                  s.swap23, s.typeTagIn, s.typeTagOut, s.fromint, s.toint,
                  s.fastpipe, s.fma, s.div, s.sqrt, s.wflags, s.vec)
   sigs zip decoder map {case(s,d) => s := d}
+
+  // NRS custom op (opcode 0101011) is decoded here rather than in the main table
+  // so we don't have to add a column to every FP decode row. It reads two FP
+  // operands and writes one FP result; the NRS arithmetic unit handles it.
+  val isNRS = io.inst(6,0) === "b0101011".U
+  s.nrs := isNRS
+  when (isNRS) {
+    s.ldst       := false.B
+    s.wen        := true.B
+    s.ren1       := true.B
+    s.ren2       := true.B
+    s.ren3       := false.B
+    s.swap12     := false.B
+    s.swap23     := false.B
+    s.typeTagIn  := S
+    s.typeTagOut := S
+    s.fromint    := false.B
+    s.toint      := false.B
+    s.fastpipe   := false.B
+    s.fma        := false.B
+    s.div        := false.B
+    s.sqrt       := false.B
+    s.wflags     := false.B
+    s.vec        := false.B
+  }
 }
 
 class FPUCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
@@ -1038,6 +1127,13 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
 
+  // Custom NRS arithmetic unit (opcode 0101011). NRS_ID = inst[14:12], OP = inst[31:25].
+  val nrsfu = Module(new NRSUnit(cfg.fpmuLatency))
+  nrsfu.io.in.valid := req_valid && ex_ctrl.nrs
+  nrsfu.io.in.bits  := fuInput(Some(FType.S))
+  nrsfu.io.nrsId    := ex_reg_inst(14,12)
+  nrsfu.io.op       := ex_reg_inst(28,25)  // OP = funct7[3:0]
+
   val divSqrt_wen = WireDefault(false.B)
   val divSqrt_inFlight = WireDefault(false.B)
   val divSqrt_waddr = Reg(UInt(5.W))
@@ -1053,6 +1149,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   val pipes = List(
     Pipe(fpmu, fpmu.latency, (c: FPUCtrlSigs) => c.fastpipe, fpmu.io.out.bits),
     Pipe(ifpu, ifpu.latency, (c: FPUCtrlSigs) => c.fromint, ifpu.io.out.bits),
+    Pipe(nrsfu, nrsfu.latency, (c: FPUCtrlSigs) => c.nrs, nrsfu.io.out.bits),
     Pipe(sfma, sfma.latency, (c: FPUCtrlSigs) => c.fma && c.typeTagOut === S, sfma.io.out.bits)) ++
     (fLen > 32).option({
           val dfma = Module(new FPUFMAPipe(cfg.dfmaLatency, FType.D, cfg.nrs))
@@ -1083,7 +1180,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
   val wen = RegInit(0.U((maxLatency-1).W))
   val wbInfo = Reg(Vec(maxLatency-1, new WBInfo))
-  val mem_wen = mem_reg_valid && (mem_ctrl.fma || mem_ctrl.fastpipe || mem_ctrl.fromint)
+  val mem_wen = mem_reg_valid && (mem_ctrl.fma || mem_ctrl.fastpipe || mem_ctrl.fromint || mem_ctrl.nrs)
   val write_port_busy = RegEnable(mem_wen && (memLatencyMask & latencyMask(ex_ctrl, 1)).orR || (wen & latencyMask(ex_ctrl, 0)).orR, req_valid)
   ccover(mem_reg_valid && write_port_busy, "WB_STRUCTURAL", "structural hazard on writeback")
 
@@ -1153,7 +1250,9 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   io.sboard_clra := waddr
   ccover(io.sboard_clr && load_wb, "DUAL_WRITEBACK", "load and FMA writeback on same cycle")
   // we don't currently support round-max-magnitude (rm=4)
-  io.illegal_rm := io.inst(14,12).isOneOf(5.U, 6.U) || io.inst(14,12) === 7.U && io.fcsr_rm >= 5.U
+  // For the NRS custom op, inst[14:12] is NRS_ID (not a rounding mode), so don't
+  // treat NRS_ID 5/6/7 as an illegal rounding mode.
+  io.illegal_rm := !id_ctrl.nrs && (io.inst(14,12).isOneOf(5.U, 6.U) || io.inst(14,12) === 7.U && io.fcsr_rm >= 5.U)
 
   if (cfg.divSqrt) {
     val divSqrt_inValid = mem_reg_valid && (mem_ctrl.div || mem_ctrl.sqrt) && !divSqrt_inFlight
