@@ -10,5 +10,8 @@ MILL ?= mill
 verilog:
 	cd $(base_dir) && $(MILL) emulator[freechips.rocketchip.system.TestHarness,$(CONFIG)].mfccompiler.compile
 
+verilator:
+	cd $(base_dir) && $(MILL) emulator[freechips.rocketchip.system.TestHarness,$(CONFIG)].verilator.elf
+
 clean:
 	rm -rf out/

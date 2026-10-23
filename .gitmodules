@@ -13,5 +13,5 @@
 	branch = master
 [submodule "dependencies/nrshgl"]
 	path = dependencies/nrshgl
-	url = https://github.com/Earthbert/nrshgl.git
-	branch = main
+	url = https://github.com/cs-pub-ro/nrshgl.git
+

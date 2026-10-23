@@ -373,6 +373,9 @@ trait Emulator extends Cross.Module2[String, String] {
     }
 
     def elf = T.persistent {
+      // The CMakeLists only has the Verilog file names, depend on their
+      // contents too, otherwise a hardware change doesn't rebuild the emulator.
+      mfccompiler.rtls()
       mill.util.Jvm.runSubprocess(Seq("cmake", "-G", "Ninja", "-S", cmakefileLists().path, "-B", T.dest.toString).map(_.toString), Map[String, String](), T.dest)
       mill.util.Jvm.runSubprocess(Seq("ninja", "-C", T.dest).map(_.toString), Map[String, String](), T.dest)
       PathRef(T.dest / "emulator")
